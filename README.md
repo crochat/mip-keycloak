@@ -6,7 +6,7 @@ In order to make it clearer, I also coded a small HTTP lib in bash.
 
 Examples:
 * ./mip_login.sh http://<MIP_HOSTNAME>
-* ./mip_login.sh http://<MIP_HOSTNAME>:<PORT>
+* ./mip_login.sh http://<MIP_HOSTNAME:<MIP_PORT>
 * ./mip_login.sh http://<MIP_HOSTNAME>/services/sso/login
 * ./mip_login.sh http://<MIP_HOSTNAME>/services/login/<EXTERNAL_IDENTITY_PROVIDER>
 
