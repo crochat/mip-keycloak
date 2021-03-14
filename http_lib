@@ -2,6 +2,7 @@
 shopt -s extglob
 
 if [[ "$(command -v curl)" = "" || "$(command -v jq)" = "" || "$(command -v tidy)" = "" || "$(command -v xmllint)" = "" ]]; then
+	echo "I just need to install some packages: curl, jq, tidy and libxml2-utils."
 	sudo apt-get update && sudo apt-get install curl jq tidy libxml2-utils
 fi
 
