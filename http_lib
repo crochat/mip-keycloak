@@ -1,0 +1,638 @@
+# packages: curl, jq, tidy, libxml2-utils (xmllint)
+shopt -s extglob
+
+if [[ "$(command -v curl)" = "" || "$(command -v jq)" = "" || "$(command -v tidy)" = "" || "$(command -v xmllint)" = "" ]]; then
+	sudo apt-get update && sudo apt-get install curl jq tidy libxml2-utils
+fi
+
+json2url(){
+	local result=""
+
+	if [[ "$1" != "" ]]; then
+		local tmp_params=$(echo "$1" | jq . | grep -E '^  ')
+		if [[ "$tmp_params" != "" ]]; then
+			local IFS=$',\n'
+			for param in $(echo "$tmp_params"); do
+				param=$(echo "$param" | awk -F '  ' '{print $2}' | cut -c2- | rev | cut -c2- | rev)
+				key=$(echo "$param" | awk -F '": "' '{print $1}')
+				val=$(echo "$param" | awk -F '": "' '{print $2}')
+				if [[ "$key" != "" && "$val" != "" ]]; then
+					if [[ "$result" != "" ]]; then
+						result+='&'
+					fi
+					result+="$key=$val"
+				fi
+			done
+		fi
+	fi
+
+	echo "$result"
+}
+
+url2json(){
+	local result=""
+
+	if [[ "$1" != "" ]]; then
+		local IFS=$'&'
+		for param in $(echo "$1"); do
+			key=$(echo "$param" | awk -F '=' '{print $1}')
+			val=$(echo "$param" | awk -F '=' '{print $2}')
+			if [[ "$key" != "" && "$val" != "" ]]; then
+				if [[ "$result" != "" ]]; then
+					result+=', '
+				fi
+				result+='"'$key'": "'$val'"'
+			fi
+		done
+	fi
+
+	if [[ "$result" != "" ]]; then
+		result="{$result}"
+	fi
+
+	echo "$result"
+}
+
+rawurlencode(){
+	local string="$1"
+	local strlen=${#string}
+	local encoded=""
+	local pos c o
+
+	for (( pos=0; pos<strlen; pos++ )); do
+		c=${string:$pos:1}
+		case "$c" in
+			[-_.~a-zA-Z0-9])
+				o="${c}"
+				;;
+			*)
+				printf -v o '%%%02x' "'$c"
+				;;
+		esac
+		encoded+="${o}"
+	done
+
+	echo "$encoded"
+}
+
+url_extract(){
+	local url="$1"
+
+	local result=''
+
+	if [[ "$url" != "" ]]; then
+		local args="$(echo $url | grep '?' | cut -d? -f2)"
+		url="$(echo $url | cut -d? -f1)"
+
+		local proto="$(echo $url | grep '://' | sed -e 's,^\(.*://\).*,\1,g')"
+		url="$(echo $url | sed -e s,$proto,,g)"
+		proto="$(echo $proto | awk -F '://' '{print $1}')"
+
+		local userpass="$(echo $url | grep @ | cut -d@ -f1)"
+		url="$(echo $url | sed -e s,$userpass@,,g)"
+		local user="$(echo $userpass | cut -d: -f1)"
+		local pass="$(echo $userpass | grep : | cut -d: -f2)"
+
+		local full_url="${proto}://${url}"
+		if [[ "$args" != "" ]]; then
+			full_url+="?${args}"
+		fi
+
+		local hostport="$(echo $url | cut -d/ -f1)"
+		local host="$(echo $hostport | cut -d: -f1)"
+		local port="$(echo $hostport | grep : | cut -d: -f2)"
+
+		local filepath="$(echo $url | grep / | cut -d/ -f2-)"
+		local parentpath="$(dirname $filepath 2>/dev/null)"
+		local filename="$(basename $filepath 2>/dev/null)"
+
+		# This can be useful to return a multi-line element as json attribute. To extract it after, use "jq -jr .multiline_test"
+		#local multiline_test='super
+		#multi
+		#	line
+		#		test'
+		#multiline_test=$(jq -sR . <<< "$multiline_test")
+		result='{"url": "'$url'", "full_url": "'$full_url'", "args": "'$args'", "proto": "'$proto'", "user": "'$user'", "pass": "'$pass'", "host": "'$host'", "port": "'$port'", "filepath": "'$filepath'", "parentpath": "'$parentpath'", "filename": "'$filename'"}'
+	fi
+
+	echo "$result"
+}
+
+browse(){
+	local headers_var=""
+	local html_var=""
+	local codes_var=""
+	local code_var=""
+	local locations_var=""
+	local form_url_var=""
+	local form_method_var=""
+	local form_params_var=""
+	local links_var=""
+
+	local headers=""
+	local user_agent=""
+	local content_type=""
+	local cookie_file=""
+	local params=""
+	local json_params=""
+	local final_params=""
+	local follow=0
+	local verbose_level=0
+	local effective_urls=0
+	local method=""
+	local url=""
+
+	local result=""
+	local res_url=""
+	local res_url_base=""
+	local res_url_proto=""
+	local res_url_host=""
+	local res_url_path=""
+	local res_url_file=""
+	local res_url_port=""
+	local res_url_params=""
+	local res_headers=""
+	local res_codes=""
+	local res_code=""
+	local res_locations=""
+	local res_html=""
+	local res_form_url=""
+	local res_form_method=""
+	local res_form_params=""
+	local res_links=""
+
+	local positional=()
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+			--return-headers-var)
+				headers_var=$2
+				shift
+				shift
+				;;
+			--return-html-var)
+				html_var=$2
+				shift
+				shift
+				;;
+			--return-codes-var)
+				codes_var=$2
+				shift
+				shift
+				;;
+			--return-code-var)
+				code_var=$2
+				shift
+				shift
+				;;
+			--return-locations-var)
+				locations_var=$2
+				shift
+				shift
+				;;
+			--return-form-url-var)
+				form_url_var=$2
+				shift
+				shift
+				;;
+			--return-form-method-var)
+				form_method_var=$2
+				shift
+				shift
+				;;
+			--return-form-params-var)
+				form_params_var=$2
+				shift
+				shift
+				;;
+			--return-links-var)
+				links_var=$2
+				shift
+				shift
+				;;
+			--user-agent)
+				user_agent=$2
+				shift
+				shift
+				;;
+			--content-type)
+				content_type=$2
+				shift
+				shift
+				;;
+			--headers)
+				headers=$2
+				shift
+				shift
+				;;
+			--effective-urls)
+				effective_urls=1
+				shift
+				;;
+			--cookie-file)
+				cookie_file=$2
+				shift
+				shift
+				;;
+			--params)
+				params=$2
+				shift
+				shift
+				;;
+			--json-params)
+				json_params=$2
+				shift
+				shift
+				;;
+			--method)
+				method=$2
+				shift
+				shift
+				;;
+			--url)
+				url=$2
+				shift
+				shift
+				;;
+			--follow)
+				follow=1
+				shift
+				;;
+			-+(v))
+				verbose_level=$(echo "$1" | cut -c2- | awk -F 'v' '{print NF-1}')
+				shift
+				;;
+			*)
+				positional+=("$1")
+				shift
+				;;
+		esac
+	done
+	set -- "${positional[@]}"
+
+	if [[ "$user_agent" = "" && "$USER_AGENT" != "" ]]; then
+		user_agent=$USER_AGENT
+	fi
+	if [[ "$content_type" = "" && "$CONTENT_TYPE" != "" ]]; then
+		content_type=$CONTENT_TYPE
+	fi
+
+	local cmd_headers=""
+	if [[ "$headers" != "" ]]; then
+		headers=$(echo "$headers" | jq . | grep -E '^  ')
+		if [[ "$headers" != "" ]]; then
+			local ifs=$IFS
+			local IFS=$',\n'
+			for json_line in $(echo "$headers"); do
+				json_line=$(echo "$json_line" | awk -F '  ' '{print $2}' | cut -c2- | rev | cut -c2- | rev)
+				key=$(echo "$json_line" | awk -F '": "' '{print $1}')
+				val=$(echo "$json_line" | awk -F '": "' '{print $2}')
+				if [[ "$cmd_headers" != "" ]]; then
+					cmd_headers+=' \
+	'
+				fi
+				cmd_headers+='-H "'$key': '$val'"'
+			done
+			IFS=$ifs
+		fi
+	fi
+
+	if [[ "$user_agent" != "" ]]; then
+		if [[ "$cmd_headers" != "" ]]; then
+			cmd_headers+=' \
+	'
+		fi
+		cmd_headers+='-H "User-Agent: '$user_agent'"'
+	fi
+	if [[ "$content_type" != "" ]]; then
+		if [[ "$cmd_headers" != "" ]]; then
+			cmd_headers+=' \
+	'
+		fi
+		cmd_headers+='-H "Content-Type: '$content_type'"'
+	fi
+
+	if [[ "$params" != "" ]]; then
+		final_params=$params
+	fi
+	if [[ "$json_params" != "" ]]; then
+		if [[ "$final_params" != "" ]]; then
+			final_params+="&"
+		fi
+		final_params+=$(json2url "$json_params")
+	fi
+
+	local cmd=""
+	local cmd_args="--silent -gi"
+	local cmd_cookies=""
+	local cmd_params=""
+	local cmd_method='-X "GET"'
+
+	if [[ $follow -eq 1 ]]; then
+		cmd_args+="L"
+	fi
+	if [[ $verbose_level -ge 2 ]]; then
+		cmd_args+="v"
+	fi
+
+	if [[ "$cookie_file" != "" ]]; then
+		cmd_cookies='-b "'$cookie_file'" \
+	-c "'$cookie_file'"'
+	fi
+
+	if [[ "$final_params" != "" ]]; then
+		if [[ "$content_type" = "application/json" ]]; then
+			cmd_params="--data '$(url2json $final_params)'"
+		else
+			cmd_params='--data "'$final_params'"'
+		fi
+	fi
+
+	if [[ "$method" != "" ]]; then
+		cmd_method='-X "'$method'"'
+	fi
+
+	if [[ "$url" != "" ]]; then
+		cmd="curl"
+
+		if [[ "$cmd_args" != "" ]]; then
+			cmd+=" $cmd_args"
+		fi
+		if [[ "$cmd_headers" != "" ]]; then
+			cmd+=' \
+	'"$cmd_headers"
+		fi
+		if [[ "$cmd_cookies" != "" ]]; then
+			cmd+=' \
+	'"$cmd_cookies"
+		fi
+		if [[ "$cmd_params" != "" ]]; then
+			cmd+=' \
+	'"$cmd_params"
+		fi
+		if [[ "$cmd_method" != "" ]]; then
+			cmd+=' \
+	'"$cmd_method"
+		fi
+		cmd+=' \
+	"'$url'"'
+
+		if [[ $verbose_level -ge 1 ]]; then
+			echo "$cmd"
+		fi
+	fi
+
+
+
+	if [[ "$cmd" != "" ]]; then
+		result=$(eval "$cmd")
+		result="$(echo "$result" | tr -d '\r')"
+
+		while IFS= read -r result_line; do
+			if [[ "$(echo $result_line | grep -E '^<')" != "" ]]; then
+				if [[ "$res_html" != "" ]]; then
+					res_html+="
+"
+				fi
+				res_html+="$result_line"
+			elif [[ "$res_html" = "" ]]; then
+				if [[ "$res_headers" != "" ]]; then
+					res_headers+="
+"
+				fi
+				res_headers+="$result_line"
+				if [[ "$(echo $result_line | grep -E '^[lL]ocation: ')" != "" ]]; then
+					if [[ "$res_locations" != "" ]]; then
+						res_locations+=" "
+					fi
+					res_locations+=$(echo $result_line | grep -E '^[lL]ocation: ' | cut -d' ' -f2)
+				fi
+			else
+				res_html+="
+$result_line"
+			fi
+		done <<< "$(echo -e "$result")"
+
+		res_codes=$(echo "$res_headers" | grep -E '^HTTP/.* [0-9]{3} .*' | awk '{print $2}' | tr '\n' ' ' | rev | cut -c2- | rev)
+		res_code=$(echo $res_codes | awk '{print $NF}')
+	fi
+
+
+
+	if [[ "$res_html" != "" ]]; then
+		res_url="$url"
+		if [[ "$res_locations" != "" ]]; then
+			res_url=$(echo "$res_locations" | awk '{print $NF}')
+		fi
+		if [[ $effective_urls -eq 1 ]]; then
+			local tmp_url=$(url_extract "$res_url")
+			if [[ "$tmp_url" != "" ]]; then
+				res_url="$tmp_url"
+				res_url_proto="$(echo "$res_url" | jq -r .proto)"
+				res_url_host="$(echo "$res_url" | jq -r .host)"
+				res_url_port="$(echo "$res_url" | jq -r .port)"
+				res_url_path="$(echo "$res_url" | jq -r .parentpath)"
+				res_url_file="$(echo "$res_url" | jq -r .filename)"
+				res_url_params="$(echo "$res_url" | jq -r .args)"
+
+				res_url_base="$res_url_proto://$res_url_host"
+				if [[ "$res_url_port" != "" ]]; then
+					res_url_base+=":$res_url_port"
+				fi
+			fi
+		fi
+	fi
+
+	if [[ "$res_html" != "" && (( "$form_url_var" != "" || "$form_method_var" != "" || "$form_params_var" != "" || "$links_var" != "" )) ]]; then
+		local tmp_res_html=$(echo "$res_html" | tidy -q -wrap -clean -ashtml -indent 2>/dev/null)
+
+		if [[ "$form_url_var" != "" ]]; then
+			res_form_url=$(xmllint --html --nowarning --xpath "string(//form/@action)" - 2>/dev/null <<< "$tmp_res_html" | sed 's/\&amp;/\&/g')
+			if [[ $effective_urls -eq 1 && "$res_url_base" != "" ]]; then
+				if [[ "$res_form_url" != "" ]]; then
+					if [[ "$(echo "$res_form_url" | grep -E '^http')" = "" ]]; then
+						if [[ "$(echo "$res_form_url" | cut -c1)" = "/" ]]; then	# Absolute path from the host
+							res_form_url="${res_url_base}${res_form_url}"
+						else														# Relative path from the parent path of the reached filename
+							res_form_url="${res_url_base}/${res_url_path}/${res_form_url}"
+						fi
+					fi
+				fi
+			fi
+		fi
+
+		if [[ "$form_method_var" != "" ]]; then
+			res_form_method=$(xmllint --html --nowarning --xpath "string(//form/@method)" - 2>/dev/null <<< "$tmp_res_html" | awk '{print toupper($0)}')
+		fi
+
+		if [[ "$form_params_var" != "" ]]; then
+			local tmp_form=$(xmllint --html --nowarning --xpath "//form" - 2>/dev/null <<< "$tmp_res_html")
+			tmp_form_fields=$(xmllint --html --nowarning --xpath ".//input" - 2>/dev/null <<< "$tmp_form")
+			tmp_form_fields+="
+$(xmllint --html --nowarning --xpath ".//button" - 2>/dev/null <<< "$tmp_form")"
+			local field
+			local attribute
+			local input_id
+			local input_type
+			local input_val
+			local ifs=$IFS
+			local IFS=$'\n'
+			for field in $(echo "$tmp_form_fields"); do
+				local tmp_field=$(echo "$field" | awk -F '<input ' '{print $2}' | awk -F '/>' '{print $1}')
+				if [[ "$tmp_field" = "" ]]; then
+					input_val=$(echo "$field" | awk -F '<button ' '{print $2}' | awk -F '>' '{print $2}' | awk -F '<' '{print $1}')
+					field=$(echo "$field" | awk -F '<button ' '{print $2}' | awk -F '>' '{print $1}')
+				else
+					field=$tmp_field
+				fi
+				input_id=$(echo "$field" | awk -F 'id=' '{print $2}' | cut -d'"' -f2)
+				input_type=$(echo "$field" | awk -F 'type=' '{print $2}' | cut -d'"' -f2)
+				if [[ "$input_val" = "" ]]; then
+					input_val=$(echo "$field" | awk -F 'value=' '{print $2}' | cut -d'"' -f2)
+				fi
+				input_val=$(rawurlencode "$input_val")
+				if [[ "$input_id" != "" && "$input_type" != "" ]]; then
+					if [[ "$res_form_params" != "" ]]; then
+						res_form_params+="+"
+					fi
+					res_form_params+="$input_id,$input_type,$input_val"
+				fi
+			done
+			IFS=$ifs
+		fi
+
+		if [[ "$links_var" != "" ]]; then
+			local item_count=$(xmllint --html --nowarning --xpath "count(.//a)" - 2>/dev/null <<< "$tmp_res_html")
+			local item
+			local link_href
+			local tmp_url
+			local link_text
+			for ((i=1;$i<=$item_count;i++)); do
+				item=$(xmllint --html --nowarning --xpath "(.//a)[$i]" - 2>/dev/null <<< "$tmp_res_html")
+				link_href=$(xmllint --html --nowarning --xpath "//@href" - 2>/dev/null <<< "$item" | awk -F 'href=' '{print $2}' | cut -d\" -f2 | sed 's/\&amp;/\&/g')
+				link_text=$(xmllint --html --nowarning --xpath "//*/text()" - 2>/dev/null <<< "$item" | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n[ \t]\+/ /g')
+				if [[ "$link_href" != "" && "$link_text" != "" ]]; then
+					if [[ "$res_links" != "" ]]; then
+						res_links+="+"
+					fi
+					if [[ $effective_urls -eq 1 && "$res_url_base" != "" ]]; then
+						if [[ "$link_href" != "" ]]; then
+							if [[ "$(echo "$link_href" | grep -E '^http')" = "" ]]; then
+								if [[ "$(echo "$link_href" | cut -c1)" = "/" ]]; then		# Absolute path from the host
+									link_href="${res_url_base}${link_href}"
+								else														# Relative path from the parent path of the reached filename
+									link_href="${res_url_base}/${res_url_path}/${link_href}"
+								fi
+							fi
+						fi
+					fi
+					res_links+="$link_href,$link_text"
+				fi
+			done
+		fi
+	fi
+
+
+
+	if [[ "$headers_var" != "" ]]; then
+		eval "$headers_var='$res_headers'"
+	fi
+	if [[ "$html_var" != "" ]]; then
+		res_html=$(echo "$res_html" | sed -e "s,\x27,´,g")	# Replacing single quotes in string
+		eval "$html_var='$res_html'"
+	fi
+	if [[ "$codes_var" != "" ]]; then
+		eval "$codes_var='$res_codes'"
+	fi
+	if [[ "$code_var" != "" ]]; then
+		eval "$code_var='$res_code'"
+	fi
+	if [[ "$locations_var" != "" ]]; then
+		eval "$locations_var='$res_locations'"
+	fi
+	if [[ "$form_url_var" != "" ]]; then
+		eval "$form_url_var='$res_form_url'"
+	fi
+	if [[ "$form_method_var" != "" ]]; then
+		eval "$form_method_var='$res_form_method'"
+	fi
+	if [[ "$form_params_var" != "" ]]; then
+		eval "$form_params_var='$res_form_params'"
+	fi
+	if [[ "$links_var" != "" ]]; then
+		eval "$links_var='$res_links'"
+	fi
+}
+
+print_http_response_resume(){
+	local codes=$1
+	local locations=$2
+
+	echo "	Received HTTP codes <$codes>"
+	if [[ "$codes" != "" && "$locations" != "" ]]; then
+		echo "	Locations:"
+		local i=1
+		for tmp_location in $(echo "$locations"); do
+			echo "		HTTP $(echo "$codes" | awk -v i="$i" '{print $i}') => $tmp_location"
+			i=$(expr $i + 1)
+		done
+	fi
+	echo "*******************************************************************************************************************"
+}
+
+prepare_form(){
+	local form_params_list=""
+	local form_params_var=""
+	local res_form_params=""
+	local form_param
+	local param_name
+	local param_type
+	local param_val
+
+	local positional=()
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+			--return-form-params-var)
+				form_params_var=$2
+				shift
+				shift
+				;;
+			--params)
+				form_params_list=$2
+				shift
+				shift
+				;;
+			*)
+				positional+=("$1")
+				shift
+				;;
+		esac
+	done
+	set -- "${positional[@]}"
+
+	for form_param in $(echo "$form_params_list" | tr '+' '\n'); do
+		param_name=$(echo $form_param | cut -d, -f1)
+		param_type=$(echo $form_param | cut -d, -f2)
+		param_val=$(echo $form_param | cut -d, -f3)
+		if [[ "$(echo "$param_name" | grep -F '-')" = "" && "${!param_name}" = "" ]]; then
+			echo -n "$param_name: "
+			case $param_type in
+				text)
+					read param_val
+					;;
+				password)
+					read -s param_val
+					;;
+			esac
+			if [[ "$param_val" != "" ]]; then
+				if [[ "$res_form_params" != "" ]]; then
+					res_form_params+="&"
+				fi
+				res_form_params+="$param_name=$param_val"
+			fi
+		fi
+	done
+
+	if [[ "$res_form_params" != "" && "$form_params_var" != "" ]]; then
+		eval "$form_params_var='$res_form_params'"
+	fi
+}
