@@ -14,6 +14,24 @@ START_URL="https://mip.humanbrainproject.eu"
 
 
 
+positional=()
+verbose_level=0
+verbose_string=""
+while [[ $# -gt 0 ]]; do
+	case $1 in
+		-+(v))
+			verbose_string="$1"
+			verbose_level=$(echo "$1" | cut -c2- | awk -F 'v' '{print NF-1}')
+			shift
+			;;
+		*)
+			positional+=("$1")
+			shift
+			;;
+	esac
+done
+set -- "${positional[@]}"
+
 base_url=""
 if [[ "$1" != "" ]]; then
 	base_url="$1"
@@ -77,7 +95,7 @@ fi
 echo
 echo "Connecting to the MIP"
 echo "	Sending HTTP GET to $url"
-browse -v --follow \
+browse ${verbose_string} --follow \
 	--return-headers-var 'result_headers' \
 	--return-html-var 'result_html' \
 	--return-locations-var 'locations' \
@@ -141,7 +159,7 @@ if [[ "$form_alt_link" != "" ]]; then
 	echo
 	echo "Following link to Identity Provider"
 	echo "	Sending HTTP GET to $form_alt_link"
-	browse -v --follow \
+	browse ${verbose_string} --follow \
 		--return-headers-var 'result_headers' \
 		--return-html-var 'result_html' \
 		--return-locations-var 'locations' \
@@ -186,7 +204,7 @@ if [[ "$form_url" != "" && "$form_params" != "" ]]; then
 	echo
 	echo "Posting the KeyCloak form with provided credentials."
 	echo "	Sending HTTP POST to $form_url"
-	browse -v \
+	browse ${verbose_string} \
 		--return-headers-var 'result_headers' \
 		--return-html-var 'result_html' \
 		--return-locations-var 'locations' \
@@ -222,7 +240,7 @@ if [[ "$location" != "" ]]; then
 	code=""
 
 	echo "	Sending HTTP GET to <$location>"
-	browse -v --follow \
+	browse ${verbose_string} --follow \
 		--return-headers-var 'result_headers' \
 		--return-html-var 'result_html' \
 		--return-locations-var 'locations' \
@@ -239,6 +257,8 @@ fi
 
 if [[ $code -eq 200 && "$result_html" != "" ]]; then
 	result_html=$(echo "$result_html" | tidy -q -wrap -clean -ashtml -indent 2>/dev/null)
-	echo
-	echo "$result_html"
+	if [[ $verbose_level -ge 1 ]]; then
+		echo
+		echo "$result_html"
+	fi
 fi
