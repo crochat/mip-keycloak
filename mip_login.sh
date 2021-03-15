@@ -116,7 +116,7 @@ print_http_response_resume "$codes" "$locations"
 
 if [[ $code -eq 200 ]]; then
 	if [[ "$locations" != "" ]]; then
-		first_redirect=$(echo "$locations" | cut -d' ' -f1)
+		first_redirect=$(echo "$locations" | awk '{print $NF}')
 		first_redirect=$(url_extract $first_redirect)
 		args=$(echo "$first_redirect" | jq -r .args)
 		if [[ "$args" != "" ]]; then
