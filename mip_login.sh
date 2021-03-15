@@ -123,7 +123,7 @@ if [[ $code -eq 200 ]]; then
 			args=$(url2json "$args")
 			redirect_url=$(echo "$args" | jq -r .redirect_uri 2>/dev/null)
 			if [[ "$redirect_url" != "" ]]; then
-				echo "Analyzing redirect_uri..."
+				echo -n "Analyzing redirect_uri..."
 				redirect_url=$(rawurldecode "$redirect_url")
 				redirect_url=$(url_extract $redirect_url)
 
@@ -146,6 +146,7 @@ if [[ $code -eq 200 ]]; then
 			redirect_url_path=$(echo $redirect_url | jq -r .parentpath)
 			redirect_url_filename=$(echo $redirect_url | jq -r .filename)
 			if [[ "$first_url_full_url" != "$redirect_url_full_url" ]]; then
+				echo "ko"
 				echo "WARNING: The redirect_uri parameter points to a different URL than the first one. It may fail when it has to go back to the MIP."
 				differences='URL (start vs redirect) : '$first_url_full_url' <> '$redirect_url_full_url
 				if [[ "$first_url_proto" != "$redirect_url_proto" ]]; then
@@ -168,15 +169,17 @@ Path (start vs redirect) : '$first_url_path' <> '$redirect_url_path
 					differences+='
 Filename (start vs redirect) : '$first_url_filename' <> '$redirect_url_filename
 				fi
-			fi
-		fi
 
-		column -t <<< "$differences"
-		echo
-		echo -n "Continue? [y/n] "
-		read answer
-		if [[ "$answer" != "y" ]]; then
-			exit 0
+				column -t <<< "$differences"
+				echo
+				echo -n "Continue? [y/n] "
+				read answer
+				if [[ "$answer" != "y" ]]; then
+					exit 0
+				fi
+			else
+				echo "ok"
+			fi
 		fi
 	fi
 
