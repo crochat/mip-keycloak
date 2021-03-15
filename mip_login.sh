@@ -115,6 +115,71 @@ browse ${verbose_string} --follow \
 print_http_response_resume "$codes" "$locations"
 
 if [[ $code -eq 200 ]]; then
+	if [[ "$locations" != "" ]]; then
+		first_redirect=$(echo "$locations" | cut -d' ' -f1)
+		first_redirect=$(url_extract $first_redirect)
+		args=$(echo "$first_redirect" | jq -r .args)
+		if [[ "$args" != "" ]]; then
+			args=$(url2json "$args")
+			redirect_url=$(echo "$args" | jq -r .redirect_uri 2>/dev/null)
+			if [[ "$redirect_url" != "" ]]; then
+				echo "Analyzing redirect_uri..."
+				redirect_url=$(rawurldecode "$redirect_url")
+				redirect_url=$(url_extract $redirect_url)
+
+				first_url=$(url_extract $url)
+			fi
+		fi
+
+		if [[ "$first_url" != "" && "$redirect_url" != "" ]]; then
+			first_url_full_url=$(echo $first_url | jq -r .full_url)
+			first_url_proto=$(echo $first_url | jq -r .proto)
+			first_url_host=$(echo $first_url | jq -r .host)
+			first_url_port=$(echo $first_url | jq -r .port)
+			first_url_path=$(echo $first_url | jq -r .parentpath)
+			first_url_filename=$(echo $first_url | jq -r .filename)
+
+			redirect_url_full_url=$(echo $redirect_url | jq -r .full_url)
+			redirect_url_proto=$(echo $redirect_url | jq -r .proto)
+			redirect_url_host=$(echo $redirect_url | jq -r .host)
+			redirect_url_port=$(echo $redirect_url | jq -r .port)
+			redirect_url_path=$(echo $redirect_url | jq -r .parentpath)
+			redirect_url_filename=$(echo $redirect_url | jq -r .filename)
+			if [[ "$first_url_full_url" != "$redirect_url_full_url" ]]; then
+				echo "WARNING: The redirect_uri parameter points to a different URL than the first one. It may fail when it has to go back to the MIP."
+				differences='URL (start vs redirect) : '$first_url_full_url' <> '$redirect_url_full_url
+				if [[ "$first_url_proto" != "$redirect_url_proto" ]]; then
+					differences+='
+Protocol (start vs redirect) : '$first_url_proto' <> '$redirect_url_proto
+				fi
+				if [[ "$first_url_host" != "$redirect_url_host" ]]; then
+					differences+='
+Host (start vs redirect) : '$first_url_host' <> '$redirect_url_host
+				fi
+				if [[ "$first_url_port" != "$redirect_url_port" ]]; then
+					differences+='
+Port (start vs redirect) : '$first_url_port' <> '$redirect_url_port
+				fi
+				if [[ "$first_url_path" != "$redirect_url_path" ]]; then
+					differences+='
+Path (start vs redirect) : '$first_url_path' <> '$redirect_url_path
+				fi
+				if [[ "$first_url_filename" != "$redirect_url_filename" ]]; then
+					differences+='
+Filename (start vs redirect) : '$first_url_filename' <> '$redirect_url_filename
+				fi
+			fi
+		fi
+
+		column -t <<< "$differences"
+		echo
+		echo -n "Continue? [y/n] "
+		read answer
+		if [[ "$answer" != "y" ]]; then
+			exit 0
+		fi
+	fi
+
 	if [[ "$links" != "" ]]; then
 		links=$(echo "$links" | cut -d'+' -f1)
 		link_href=$(echo "$links" | cut -d, -f1)
