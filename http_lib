@@ -18,6 +18,7 @@ json2url(){
 				key=$(echo "$param" | awk -F '": "' '{print $1}')
 				val=$(echo "$param" | awk -F '": "' '{print $2}')
 				if [[ "$key" != "" && "$val" != "" ]]; then
+					val=$(rawurlencode "$val")
 					if [[ "$result" != "" ]]; then
 						result+='&'
 					fi
@@ -39,6 +40,7 @@ url2json(){
 			key=$(echo "$param" | awk -F '=' '{print $1}')
 			val=$(echo "$param" | awk -F '=' '{print $2}')
 			if [[ "$key" != "" && "$val" != "" ]]; then
+				val=$(rawurldecode "$val")
 				if [[ "$result" != "" ]]; then
 					result+=', '
 				fi
@@ -318,7 +320,20 @@ browse(){
 	fi
 
 	if [[ "$params" != "" ]]; then
-		final_params=$params
+		final_params=""
+		local tmp_params=""
+		local key=""
+		local val=""
+		for ((i=1;i<=$(echo "$params" | awk -F '&' '{print NF}');i++)); do
+			local tmp_param=$(echo "$params" | awk -F '&' -v field=$i '{print $field}')
+			local key=$(echo "$tmp_param" | cut -d= -f1)
+			local val=$(echo "$tmp_param" | cut -d= -f2)
+			val=$(rawurlencode "$val")
+			if [[ "$final_params" != "" ]]; then
+				final_params+="&"
+			fi
+			final_params+="$key=$val"
+		done
 	fi
 	if [[ "$json_params" != "" ]]; then
 		if [[ "$final_params" != "" ]]; then
@@ -495,7 +510,6 @@ $(xmllint --html --nowarning --xpath ".//button" - 2>/dev/null <<< "$tmp_form")"
 				if [[ "$input_val" = "" ]]; then
 					input_val=$(echo "$field" | awk -F 'value=' '{print $2}' | cut -d'"' -f2)
 				fi
-				input_val=$(rawurlencode "$input_val")
 				if [[ "$input_id" != "" && "$input_type" != "" ]]; then
 					if [[ "$res_form_params" != "" ]]; then
 						res_form_params+="+"

@@ -291,8 +291,8 @@ if [[ "$form_url" != "" && "$form_params" != "" ]]; then
 
 	if [[ $code -eq 302 ]]; then
 		echo
-		echo "Received an HTTP 302 from KeyCloak's identity provider, but I intercepted the call, because HTTP RFC says that with 302,"
-		echo "we're supposed to follow the new location with the same method used previously, which was POST. But here, GET is expected..."
+		echo "Received an HTTP 302 from KeyCloak, but I intercepted the call, because HTTP RFC says that with 302, we're supposed"
+		echo "to follow the new location with the same method used previously, which was POST. But here, GET is expected..."
 		location=$(echo "$locations" | awk '{print $NF}')
 	fi
 fi
